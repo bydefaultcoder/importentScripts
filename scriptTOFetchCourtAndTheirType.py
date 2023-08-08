@@ -50,7 +50,7 @@ format = {
         }
 visible_options = [ (option.text,option.get_attribute("value")) for option in select.options if option.is_displayed()]
 all_rows = []
-with open("courts1.py","w+") as f:
+with open("courts2.py","w+") as f:
     for title,value in visible_options:
         id = ""
         if simplematch.test("DEBT RECOVERY APPELLATE TRIBUNAL - *", title):
