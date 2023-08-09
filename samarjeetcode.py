@@ -8,6 +8,13 @@ import pendulum
 def normalize_text(raw_text):
     return re.sub("\s\s+", " ", normalize("NFKD", raw_text.strip()))
 
+def strTOsnake(input_string):
+    # Remove special characters from the left and right sides of the string
+    input_string = re.sub(r'^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$', '', input_string)
+    # Convert the string to snake case
+    snake_case_string = re.sub(r'\W+', '_', input_string).strip('_').lower()
+    return snake_case_string
+
 def add_string_list(string_list):
     result = ""
     for string in string_list:
@@ -52,21 +59,32 @@ def detailstrToList(keyDict,cells):
             tempDict = {}
         temp_i= temp_i+1
     return output
-def parseCaseStatus(rawStr):
-    caseStatusKeys =[
-    "Diary no/Year {diary_number} ",
-    "Case Type/Case No/Year {case_type_number_year} ",
-    "Date of Filing. {filing_date} ",
-    "Case Status. {case_status}",
-    ]
-    if simplematch.test("*Main Case -Diary No.*",rawStr):
-        caseStatusKeys.append("*Main Case -Diary No. {main_case_dairy_num}")
-    if simplematch.test("*Main Case - Case No.*",rawStr):
-        caseStatusKeys.append("*Main Case - Case No. {main_case_num}")    
-    return simplematch.match(add_string_list(caseStatusKeys),rawStr)
-def caseDetailStatus(soup):
+def parseCaseStatus(soup):
+    ansDict = {}
+    table = soup.find(class_="table table-bordered table-extra-condensed")
+    for i in table.find_all("tr"):
+        if(normalize_text(i.text)=="CASE LISTING DETAILS (Tentative)"):
+            break
+        tds = i.find_all("td")
+        if len(tds)==2:
+            ansDict[strTOsnake(normalize_text(tds[0].text))] = normalize_text(tds[1].text)
+    print(ansDict)        
+    return ansDict
 
-    return simplematch.match(add_string_list(caseDetailkeys),rawStr)
+def caseDetailStatus(soup):
+    ansDict = {}
+    tempFlag = False
+    table = soup.find(class_="table table-bordered table-extra-condensed")
+    for i in table.find_all("tr"):
+        if(normalize_text(i.text)=="CASE LISTING DETAILS (Tentative)"):
+            tempFlag = True
+        elif (normalize_text(i.text)=="PETITIONER/APPLICANT DETAIL"):
+            break    
+        tds = i.find_all("td")
+        if tempFlag and len(tds)==2:
+            ansDict[strTOsnake(normalize_text(tds[0].text))] = normalize_text(tds[1].text)
+    print(ansDict)        
+    return ansDict
 def petDetailStatus(rawStr):
     petDetailKeys = [
     "Petitioner Name -{pname} "
@@ -152,13 +170,13 @@ def rcCaseProceedingDetailList(soup):
 def parse_table(rawHtml):
     boundry = [
     "CASE STATUS {caseStatus} ",
-    # "CASE LISTING DETAILS (Tentative) {caseDetail} ", 
-    "*PETITIONER/APPLICANT DETAIL {petDetail} ",
+    "CASE LISTING DETAILS (Tentative) {caseDetail} ", 
+    "PETITIONER/APPLICANT DETAIL {petDetail} ",
     "RESPONDENTS/DEFENDENT DETAILS {resDetail} ",
-    # "PROPERTY DETAILS {propertyDetailList} ",
-    # "CASE PROCEEDING DETAILS {caseProceedingDetaillist} ",
-    "*RC/TRC CASE CURRENT STATUS {rcTcsCaseCurrentStatus} ",
-    # "RC CASE PROCEEDING DETAILS {rcCaseProceedingDetailList}",
+    "PROPERTY DETAILS {propertyDetailList} ",
+    "CASE PROCEEDING DETAILS {caseProceedingDetaillist} ",
+    "RC/TRC CASE CURRENT STATUS {rcTcsCaseCurrentStatus} ",
+    "RC CASE PROCEEDING DETAILS {rcCaseProceedingDetailList}",
     ]
     table_dic = {}
     soup = BeautifulSoup(rawHtml,'html.parser')
@@ -166,7 +184,7 @@ def parse_table(rawHtml):
     rawString = normalize_text(table.text)
     dataByBoundry = simplematch.match(add_string_list(boundry),rawString)
 
-    caseStatus = parseCaseStatus(dataByBoundry['caseStatus'])
+    caseStatus = parseCaseStatus(soup)
     caseDetail = caseDetailStatus(soup)
     petDetail = petDetailStatus(dataByBoundry['petDetail'])
     resDetail = resDetailStatus(dataByBoundry['resDetail'])
@@ -184,7 +202,7 @@ def parse_table(rawHtml):
     # print(resDetail)
     table_dic.update(caseStatus)
     # print(dataByBoundry)
-    case_no_type_yearDic = simplematch.match("{case_type}/{case_number:int}/{case_year:int}",caseStatus['case_type_number_year'])
+    case_no_type_yearDic = simplematch.match("{case_type}/{case_number:int}/{case_year:int}",caseStatus['case_type_case_no_year'])
     table_dic['case_status'] = caseStatus['case_status'].upper()
     table_dic['case_detail'] = caseDetail
     table_dic.update(case_no_type_yearDic)
@@ -199,19 +217,24 @@ def parse_table(rawHtml):
     table_dic['property_details'] = propertyDetailListDic
     table_dic['rc_tcs_case_current_status'] = rcTcsCaseCurrentStatusDic
     table_dic['rc_proceeding_detail'] = rcCaseProceedingDetailListDic
-    table_dic['unique_id'] = "tribunal-drt-" + caseStatus['case_type_number_year'] # to be dynamic
-    if(caseDetail['next_listing_date']):
-        print("c{}c".format(caseDetail['next_listing_date']))
+    table_dic['unique_id'] = "tribunal-drt-" + caseStatus['case_type_case_no_year'] # to be dynamic
+    if(caseDetail.get('next_listing_date')):
         table_dic['hearing_date'] = [pendulum.from_format(normalize_text(caseDetail['next_listing_date']),'DD/MM/YYYY')]
+    else:
+        table_dic['hearing_date'] = ''    
     return table_dic
     # table_dic.update()
 def main():
-    url = "https://drt.etribunals.gov.in/drtlive/Misdetailreport.php?no=MDkwMTIwMDAxMDEyMDIyL2x1Y2tub3c="
+    # url = "https://drt.etribunals.gov.in/drtlive/Misdetailreport.php?no=MDkwMTIwMDAxMDEyMDIyL2x1Y2tub3c="
     # url = "https://drt.etribunals.gov.in/drtlive/Misdetailreport.php?no=MDkwMTIwMDA5MTgyMDIzL2x1Y2tub3c="
     # url ="https://drt.etribunals.gov.in/drtlive/Misdetailreport.php?no=MDkwMTIwMDAwODUyMDIyL2x1Y2tub3c="
+    # url ="https://drt.etribunals.gov.in/drtlive/Misdetailreport.php?no=MDkwMTIwMDAwOTAyMDIyL2x1Y2tub3c="
+    # url ="https://drt.etribunals.gov.in/drtlive/Misdetailreport.php?no=MDkwMTIwMDAwOTAyMDIyL2x1Y2tub3c="
+    # url ="https://drt.etribunals.gov.in/drtlive/Misdetailreport.php?no=MDkwMTIwMDAxMDcyMDIyL2x1Y2tub3c="
+    url ="https://drt.etribunals.gov.in/drtlive/Misdetailreport.php?no=MDkwMTIwMDA1NjAyMDIyL2x1Y2tub3c="
     html_ = get_html_from_url(url)
-    # with open('code.html','r') as f:
-    #     html_ =f.read()
+    # with open('code.html','w+') as f:
+    #     f.write(html_)
     print(parse_table(html_))    
         # f.close()
 
